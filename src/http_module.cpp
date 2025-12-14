@@ -407,11 +407,11 @@ StrView getServerName(ngx_http_request_t* r)
 
 void addDefaultAttrs(BatchExporter::Span& span, ngx_http_request_t* r)
 {
-    // based on trace semantic conventions for HTTP from 1.16.0 OTel spec
+    // based on trace semantic conventions for HTTP from 1.38.0 OTel spec
 
-    span.add("http.method", toStrView(r->method_name));
+    span.add("http.request.method", toStrView(r->method_name));
 
-    span.add("http.target", toStrView(r->unparsed_uri));
+    span.add("url.full", toStrView(r->unparsed_uri));
 
     auto clcf = (ngx_http_core_loc_conf_t*)
         ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -419,45 +419,46 @@ void addDefaultAttrs(BatchExporter::Span& span, ngx_http_request_t* r)
         span.add("http.route", toStrView(clcf->name));
     }
 
-    span.add("http.scheme", r->connection->ssl ? "https" : "http");
+    span.add("url.scheme", r->connection->ssl ? "https" : "http");
 
     auto protocol = toStrView(r->http_protocol);
     if (protocol.size() > 5) { // "HTTP/"
-        span.add("http.flavor", protocol.substr(5));
+        span.add("network.protocol.name", "HTTP");
+        span.add("network.protocol.version", protocol.substr(5));
     }
 
     if (r->headers_in.user_agent) {
-        span.add("http.user_agent", toStrView(r->headers_in.user_agent->value));
+        span.add("user_agent.original", toStrView(r->headers_in.user_agent->value));
     }
 
     auto received = r->headers_in.content_length_n;
-    span.add("http.request_content_length", received > 0 ? received : 0);
+    span.add("http.request.body.size", received > 0 ? received : 0);
 
     auto sent = r->connection->sent - (off_t)r->header_size;
-    span.add("http.response_content_length", sent > 0 ? sent : 0);
+    span.add("http.response.body.size", sent > 0 ? sent : 0);
 
     auto status = r->err_status ? r->err_status : r->headers_out.status;
     if (status) {
-        span.add("http.status_code", status);
+        span.add("http.response.status_code", status);
 
         if (status >= 500) {
             span.setError();
         }
     }
 
-    span.add("net.host.name", getServerName(r));
+    span.add("server.address", getServerName(r));
 
     if (ngx_connection_local_sockaddr(r->connection, NULL, 0) == NGX_OK) {
         auto port = ngx_inet_get_port(r->connection->local_sockaddr);
         auto defaultPort = r->connection->ssl ? 443 : 80;
 
         if (port != defaultPort) {
-            span.add("net.host.port", port);
+            span.add("server.port", port);
         }
     }
 
-    span.add("net.sock.peer.addr", toStrView(r->connection->addr_text));
-    span.add("net.sock.peer.port", ngx_inet_get_port(r->connection->sockaddr));
+    span.add("network.peer.address", toStrView(r->connection->addr_text));
+    span.add("network.peer.port", ngx_inet_get_port(r->connection->sockaddr));
 }
 
 StrView getSpanName(ngx_http_request_t* r)
